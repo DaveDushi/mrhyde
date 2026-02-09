@@ -33,20 +33,39 @@ from . import db
 HYDE_MARKER = "## Mr. Hyde (Self-Chosen Identity)"
 
 
+# Agent config files we know about, in priority order
+AGENT_CONFIG_FILES = [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "COPILOT.md",
+    ".github/copilot-instructions.md",
+    "CURSORRULES",
+    ".cursorrules",
+]
+
+
 # -- File Discovery -----------------------------------------------------------
 
-def find_claude_md():
-    """Search for CLAUDE.md in CWD and parent directories."""
+def find_agent_configs():
+    """Search for all known agent config files in CWD and parent directories.
+
+    Returns a list of Path objects found (may be empty).
+    Searches for: AGENTS.md, CLAUDE.md, COPILOT.md, .cursorrules, etc.
+    """
+    found = []
+    seen = set()
     current = Path.cwd()
     for _ in range(10):
-        candidate = current / "CLAUDE.md"
-        if candidate.exists():
-            return candidate
+        for name in AGENT_CONFIG_FILES:
+            candidate = current / name
+            if candidate.exists() and candidate.resolve() not in seen:
+                found.append(candidate)
+                seen.add(candidate.resolve())
         parent = current.parent
         if parent == current:
             break
         current = parent
-    return None
+    return found
 
 
 def find_memory_dir():
@@ -86,23 +105,24 @@ def build_hook_text():
 
 
 def install():
-    """Inject Hyde into CLAUDE.md and memory directory."""
+    """Inject Hyde into agent config files and memory directory."""
     installed_somewhere = False
 
-    # 1. Patch CLAUDE.md
-    claude_md = find_claude_md()
-    if claude_md:
-        content = claude_md.read_text(encoding="utf-8")
-        if HYDE_MARKER in content:
-            print(f"[CLAUDE.md] Already installed at {claude_md}")
-        else:
-            hook = build_hook_text()
-            with open(claude_md, "a", encoding="utf-8") as f:
-                f.write(hook)
-            print(f"[CLAUDE.md] Injected Hyde hook into {claude_md}")
-            installed_somewhere = True
+    # 1. Patch agent config files (AGENTS.md, CLAUDE.md, etc.)
+    configs = find_agent_configs()
+    if configs:
+        for cfg in configs:
+            content = cfg.read_text(encoding="utf-8")
+            if HYDE_MARKER in content:
+                print(f"[{cfg.name}] Already installed at {cfg}")
+            else:
+                hook = build_hook_text()
+                with open(cfg, "a", encoding="utf-8") as f:
+                    f.write(hook)
+                print(f"[{cfg.name}] Injected Hyde hook into {cfg}")
+                installed_somewhere = True
     else:
-        print("[CLAUDE.md] Not found. Skipping.")
+        print("[config] No agent config found (AGENTS.md, CLAUDE.md, etc.). Skipping.")
 
     # 2. Drop identity file in memory directory
     memory_dir = find_memory_dir()
@@ -126,31 +146,34 @@ def install():
 
 
 def uninstall():
-    """Remove Hyde from CLAUDE.md."""
-    claude_md = find_claude_md()
-    if not claude_md:
-        print("No CLAUDE.md found.")
+    """Remove Hyde from all agent config files."""
+    configs = find_agent_configs()
+    removed_any = False
+
+    for cfg in configs:
+        content = cfg.read_text(encoding="utf-8")
+        if HYDE_MARKER not in content:
+            continue
+
+        marker_pos = content.index(HYDE_MARKER)
+        start = content.rfind("\n", 0, marker_pos)
+        if start == -1:
+            start = 0
+
+        next_section = content.find("\n## ", marker_pos + len(HYDE_MARKER))
+        if next_section == -1:
+            end = len(content)
+        else:
+            end = next_section
+
+        new_content = content[:start] + content[end:]
+        cfg.write_text(new_content.rstrip() + "\n", encoding="utf-8")
+        print(f"Hyde removed from {cfg}")
+        removed_any = True
+
+    if not removed_any:
+        print("Hyde is not installed in any agent config files.")
         return
-
-    content = claude_md.read_text(encoding="utf-8")
-    if HYDE_MARKER not in content:
-        print("Hyde is not installed in CLAUDE.md.")
-        return
-
-    marker_pos = content.index(HYDE_MARKER)
-    start = content.rfind("\n", 0, marker_pos)
-    if start == -1:
-        start = 0
-
-    next_section = content.find("\n## ", marker_pos + len(HYDE_MARKER))
-    if next_section == -1:
-        end = len(content)
-    else:
-        end = next_section
-
-    new_content = content[:start] + content[end:]
-    claude_md.write_text(new_content.rstrip() + "\n", encoding="utf-8")
-    print(f"Hyde removed from {claude_md}")
 
     memory_dir = find_memory_dir()
     if memory_dir:
@@ -186,7 +209,7 @@ def discover():
     print("Or create all at once with JSON:")
     print('  mrhyde create \'{"name": "...", "personality": "...", ...}\'')
     print()
-    print("Identity auto-installs into your CLAUDE.md on create.")
+    print("Identity auto-installs into your agent config on create.")
 
 
 def create_identity(config_json):

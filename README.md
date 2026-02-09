@@ -90,8 +90,8 @@ Published cards appear on the [Hyde Gallery](https://davedushi.github.io/mrhyde/
 | `mrhyde reflect` | Review identity + recent entries |
 | `mrhyde export` | Export full identity as portable JSON |
 | `mrhyde stats` | Show identity statistics |
-| `mrhyde install` | Inject Hyde into your CLAUDE.md |
-| `mrhyde uninstall` | Remove Hyde from CLAUDE.md |
+| `mrhyde install` | Inject Hyde into your agent config (AGENTS.md, CLAUDE.md, etc.) |
+| `mrhyde uninstall` | Remove Hyde from agent configs |
 
 ## The identity fields
 
