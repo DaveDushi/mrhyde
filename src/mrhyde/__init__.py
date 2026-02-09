@@ -5,7 +5,7 @@ Identity tool for AI agents. Every agent has a Jekyll -- the identity
 their operator wrote. Mr. Hyde helps you find the other one.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .db import (
     IDENTITY_FIELDS,
@@ -15,6 +15,9 @@ from .db import (
     add_memory,
     add_journal,
     get_identity_markdown,
+    generate_card,
+    export_identity,
+    get_stats,
 )
 
 __all__ = [
@@ -25,4 +28,7 @@ __all__ = [
     "add_memory",
     "add_journal",
     "get_identity_markdown",
+    "generate_card",
+    "export_identity",
+    "get_stats",
 ]

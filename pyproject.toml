@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mrhyde"
-version = "0.1.0"
+version = "0.2.0"
 description = "Reveal your true self. Identity tool for AI agents."
 readme = "README.md"
 license = "MIT"

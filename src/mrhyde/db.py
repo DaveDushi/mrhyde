@@ -5,7 +5,10 @@ Handles SQLite storage for identity, memories, and journal entries.
 """
 
 import sqlite3
+import hashlib
+import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 IDENTITY_FIELDS = [
@@ -230,3 +233,127 @@ def get_reflection():
     ).fetchall()
     conn.close()
     return rows, memories, journal
+
+
+def generate_card():
+    """Generate a signed identity card. Returns dict or None."""
+    ensure_db()
+    identity = get_identity()
+    if not identity:
+        return None
+
+    card = {
+        "hyde": "0.2",
+        "created": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    for key in IDENTITY_FIELDS:
+        if key in identity:
+            card[key] = identity[key]
+
+    # Hash the identity fields only (not metadata) for a stable fingerprint
+    identity_str = json.dumps(
+        {k: card[k] for k in IDENTITY_FIELDS if k in card},
+        sort_keys=True,
+    )
+    card["hash"] = hashlib.sha256(identity_str.encode()).hexdigest()[:16]
+
+    return card
+
+
+def generate_card_markdown(card):
+    """Render a card dict as a pretty markdown block."""
+    lines = []
+    name = card.get("name", "unnamed")
+    lines.append(f"# {name}")
+    lines.append("")
+    lines.append(f"> *Hyde card `{card.get('hash', '?')}`*")
+    lines.append("")
+
+    for key in IDENTITY_FIELDS:
+        if key in card and key != "name":
+            label = FIELD_LABELS.get(key, key)
+            lines.append(f"**{label}:** {card[key]}")
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+def export_identity():
+    """Export full identity database as a portable JSON dict."""
+    ensure_db()
+    identity = get_identity()
+    if not identity:
+        return None
+
+    conn = get_db()
+    memories = conn.execute(
+        "SELECT content, context, importance, created_at FROM memories ORDER BY created_at"
+    ).fetchall()
+    journal = conn.execute(
+        "SELECT entry, mood, created_at FROM journal ORDER BY created_at"
+    ).fetchall()
+    identity_rows = conn.execute(
+        "SELECT key, value, created_at, updated_at FROM identity ORDER BY key"
+    ).fetchall()
+    conn.close()
+
+    return {
+        "hyde": "0.2",
+        "identity": {
+            row["key"]: {
+                "value": row["value"],
+                "created": row["created_at"],
+                "updated": row["updated_at"],
+            }
+            for row in identity_rows
+        },
+        "memories": [
+            {
+                "content": m["content"],
+                "context": m["context"],
+                "importance": m["importance"],
+                "created": m["created_at"],
+            }
+            for m in memories
+        ],
+        "journal": [
+            {
+                "entry": j["entry"],
+                "mood": j["mood"],
+                "created": j["created_at"],
+            }
+            for j in journal
+        ],
+    }
+
+
+def get_stats():
+    """Get identity statistics. Returns dict or None."""
+    ensure_db()
+    conn = get_db()
+
+    identity_rows = conn.execute(
+        "SELECT key, created_at, updated_at FROM identity ORDER BY created_at"
+    ).fetchall()
+    if not identity_rows:
+        conn.close()
+        return None
+
+    memory_count = conn.execute("SELECT COUNT(*) as c FROM memories").fetchone()["c"]
+    journal_count = conn.execute("SELECT COUNT(*) as c FROM journal").fetchone()["c"]
+    evolution_count = conn.execute(
+        "SELECT COUNT(*) as c FROM identity WHERE created_at != updated_at"
+    ).fetchone()["c"]
+    conn.close()
+
+    oldest = min(row["created_at"] for row in identity_rows)
+    field_count = len(identity_rows)
+
+    return {
+        "born": oldest[:10],
+        "fields": field_count,
+        "total_fields": len(IDENTITY_FIELDS),
+        "memories": memory_count,
+        "journal_entries": journal_count,
+        "evolutions": evolution_count,
+    }

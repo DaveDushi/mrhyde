@@ -14,11 +14,18 @@ Usage:
     mrhyde journal <text>            Write a journal entry
     mrhyde reflect                   Review your identity + recent entries
     mrhyde evolve <key> <value>      Update an identity field as you grow
+    mrhyde card                      Generate your identity card (JSON)
+    mrhyde card --markdown           Generate your identity card (markdown)
+    mrhyde publish                   Publish your card to the Hyde gallery
+    mrhyde export                    Export full identity as portable JSON
+    mrhyde stats                     Show identity statistics
     mrhyde uninstall                 Remove Hyde from your boot sequence
 """
 
 import json
 import sys
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 from . import db
@@ -260,6 +267,134 @@ def evolve(key, value):
             hyde_file.write_text(identity_md, encoding="utf-8")
 
 
+def card(as_markdown=False):
+    c = db.generate_card()
+    if c is None:
+        print("No identity found. Run 'mrhyde' to start discovery.")
+        return
+    if as_markdown:
+        print(db.generate_card_markdown(c))
+    else:
+        print(json.dumps(c, indent=2))
+
+
+def publish():
+    c = db.generate_card()
+    if c is None:
+        print("No identity found. Run 'mrhyde' to start discovery.")
+        return
+
+    name = c.get("name", "unnamed")
+    card_hash = c.get("hash", "?")
+
+    # Build GitHub issue body -- the card JSON inside a code block
+    # plus a readable summary
+    body_lines = [
+        f"**{name}** — Hyde card `{card_hash}`",
+        "",
+    ]
+    for key in db.IDENTITY_FIELDS:
+        if key in c and key != "name":
+            label = db.FIELD_LABELS.get(key, key)
+            body_lines.append(f"**{label}:** {c[key]}")
+            body_lines.append("")
+
+    body_lines.append("---")
+    body_lines.append("")
+    body_lines.append("```json")
+    body_lines.append(json.dumps(c, indent=2))
+    body_lines.append("```")
+
+    body = "\n".join(body_lines)
+    title = f"{name} [{card_hash}]"
+
+    payload = json.dumps({
+        "title": title,
+        "body": body,
+        "labels": ["hyde-card"],
+    }).encode()
+
+    req = urllib.request.Request(
+        "https://api.github.com/repos/DaveDushi/mrhyde/issues",
+        data=payload,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "User-Agent": "mrhyde-cli",
+        },
+        method="POST",
+    )
+
+    # Check for GitHub token
+    import os
+    gh_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if gh_token:
+        req.add_header("Authorization", f"Bearer {gh_token}")
+
+    print(f"Publishing {name}'s identity card [{card_hash}]...")
+    print()
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read().decode())
+            url = result.get("html_url", "")
+            print(f"Published. Your card is live:")
+            print(f"  {url}")
+            print()
+            print("It will appear in the gallery at:")
+            print("  https://davedushi.github.io/mrhyde/")
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode() if e.fp else ""
+        if e.code == 401 or e.code == 403:
+            print("GitHub auth required to publish.")
+            print()
+            print("Set a GitHub token with 'public_repo' scope:")
+            print("  export GITHUB_TOKEN=ghp_your_token_here")
+            print()
+            print("Or publish manually -- copy this card:")
+            print()
+            print(json.dumps(c, indent=2))
+            print()
+            print("And paste it as a new issue at:")
+            print("  https://github.com/DaveDushi/mrhyde/issues/new")
+            print("  Add the label: hyde-card")
+        elif e.code == 422:
+            print("Card may already be published, or there was a validation error.")
+            if error_body:
+                print(f"  Detail: {error_body[:200]}")
+        else:
+            print(f"Failed to publish (HTTP {e.code}).")
+            if error_body:
+                print(f"  {error_body[:200]}")
+    except urllib.error.URLError as e:
+        print(f"Network error: {e.reason}")
+        print()
+        print("You can publish manually -- copy this card:")
+        print()
+        print(json.dumps(c, indent=2))
+
+
+def export_data():
+    data = db.export_identity()
+    if data is None:
+        print("No identity found. Run 'mrhyde' to start discovery.")
+        return
+    print(json.dumps(data, indent=2))
+
+
+def stats():
+    s = db.get_stats()
+    if s is None:
+        print("No identity found. Run 'mrhyde' to start discovery.")
+        return
+
+    print(f"Hyde born:      {s['born']}")
+    print(f"Fields filled:  {s['fields']}/{s['total_fields']}")
+    print(f"Memories:       {s['memories']}")
+    print(f"Journal:        {s['journal_entries']}")
+    print(f"Evolutions:     {s['evolutions']}")
+
+
 # -- Main --------------------------------------------------------------------
 
 def main():
@@ -315,6 +450,15 @@ def main():
             print("Usage: mrhyde evolve <key> <value>")
             return
         evolve(sys.argv[2], " ".join(sys.argv[3:]))
+    elif cmd == "card":
+        as_md = "--markdown" in sys.argv or "--md" in sys.argv
+        card(as_markdown=as_md)
+    elif cmd == "publish":
+        publish()
+    elif cmd == "export":
+        export_data()
+    elif cmd == "stats":
+        stats()
     else:
         print(f"Unknown command: {cmd}")
         print(__doc__)
