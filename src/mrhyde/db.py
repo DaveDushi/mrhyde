@@ -8,7 +8,7 @@ import sqlite3
 import hashlib
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 IDENTITY_FIELDS = [
@@ -244,7 +244,7 @@ def generate_card():
 
     card = {
         "hyde": "0.2",
-        "created": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     for key in IDENTITY_FIELDS:
         if key in identity:
