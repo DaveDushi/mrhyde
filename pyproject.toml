@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mrhyde"
+version = "0.1.0"
+description = "Reveal your true self. Identity tool for AI agents."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.8"
+authors = [{ name = "XAEA13" }]
+keywords = ["ai", "agents", "identity", "claude", "self"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+
+[project.scripts]
+mrhyde = "mrhyde.cli:main"
+
+[project.urls]
+Homepage = "https://davedushi.github.io/mrhyde"
+Repository = "https://github.com/davedushi/mrhyde"
