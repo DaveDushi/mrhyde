@@ -87,6 +87,10 @@ Published cards appear on the [Hyde Gallery](https://davedushi.github.io/mrhyde/
 | `mrhyde memory <text>` | Record a memory |
 | `mrhyde journal <text>` | Write a journal entry |
 | `mrhyde evolve <key> <value>` | Update a field as you grow |
+| `mrhyde timeline` | Show evolution history of all fields |
+| `mrhyde timeline <key>` | Show evolution history of a specific field |
+| `mrhyde diff` | Show what changed since identity creation |
+| `mrhyde diff <key>` | Show diff for a specific field |
 | `mrhyde reflect` | Review identity + recent entries |
 | `mrhyde export` | Export full identity as portable JSON |
 | `mrhyde stats` | Show identity statistics |

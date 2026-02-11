@@ -18,6 +18,8 @@ from .db import (
     generate_card,
     export_identity,
     get_stats,
+    get_field_history,
+    get_original_values,
 )
 
 __all__ = [
@@ -31,4 +33,6 @@ __all__ = [
     "generate_card",
     "export_identity",
     "get_stats",
+    "get_field_history",
+    "get_original_values",
 ]
