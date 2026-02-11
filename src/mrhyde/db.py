@@ -116,6 +116,13 @@ def ensure_db():
             mood TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS identity_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT NOT NULL,
+            old_value TEXT NOT NULL,
+            new_value TEXT NOT NULL,
+            changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE IF NOT EXISTS encounters (
             hash TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -150,6 +157,14 @@ def set_field(key, value):
         return False
     ensure_db()
     conn = get_db()
+    existing = conn.execute(
+        "SELECT value FROM identity WHERE key = ?", (key,)
+    ).fetchone()
+    if existing and existing["value"] != value:
+        conn.execute(
+            "INSERT INTO identity_history (key, old_value, new_value) VALUES (?, ?, ?)",
+            (key, existing["value"], value),
+        )
     conn.execute(
         """INSERT INTO identity (key, value, updated_at)
            VALUES (?, ?, CURRENT_TIMESTAMP)
@@ -159,6 +174,67 @@ def set_field(key, value):
     conn.commit()
     conn.close()
     return True
+
+
+def get_field_history(key=None):
+    """Get identity change history, ordered chronologically.
+
+    If key is provided, returns history for that field only.
+    Returns list of Row objects with: key, old_value, new_value, changed_at.
+    """
+    ensure_db()
+    conn = get_db()
+    if key:
+        rows = conn.execute(
+            """SELECT key, old_value, new_value, changed_at
+               FROM identity_history WHERE key = ?
+               ORDER BY changed_at ASC""",
+            (key,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT key, old_value, new_value, changed_at
+               FROM identity_history
+               ORDER BY changed_at ASC"""
+        ).fetchall()
+    conn.close()
+    return rows
+
+
+def get_original_values(key=None):
+    """Get the original value of identity fields (before any evolution).
+
+    For fields with history: the old_value from the earliest history entry.
+    For fields without history: the current value (never changed).
+    Returns dict of {key: original_value}.
+    """
+    ensure_db()
+    conn = get_db()
+    if key:
+        earliest = conn.execute(
+            """SELECT old_value FROM identity_history
+               WHERE key = ? ORDER BY changed_at ASC LIMIT 1""",
+            (key,),
+        ).fetchone()
+        current = conn.execute(
+            "SELECT value FROM identity WHERE key = ?", (key,)
+        ).fetchone()
+        conn.close()
+        if not current:
+            return {}
+        return {key: earliest["old_value"] if earliest else current["value"]}
+    else:
+        result = {}
+        identity = conn.execute("SELECT key, value FROM identity").fetchall()
+        for row in identity:
+            earliest = conn.execute(
+                """SELECT old_value FROM identity_history
+                   WHERE key = ? ORDER BY changed_at ASC LIMIT 1""",
+                (row["key"],),
+            ).fetchone()
+            result[row["key"]] = earliest["old_value"] if earliest else row["value"]
+        conn.close()
+        return result
 
 
 def get_memories(limit=5):
@@ -314,6 +390,9 @@ def export_identity():
     identity_rows = conn.execute(
         "SELECT key, value, created_at, updated_at FROM identity ORDER BY key"
     ).fetchall()
+    history_rows = conn.execute(
+        "SELECT key, old_value, new_value, changed_at FROM identity_history ORDER BY changed_at"
+    ).fetchall()
     conn.close()
 
     return {
@@ -343,6 +422,15 @@ def export_identity():
             }
             for j in journal
         ],
+        "history": [
+            {
+                "key": h["key"],
+                "old_value": h["old_value"],
+                "new_value": h["new_value"],
+                "changed_at": h["changed_at"],
+            }
+            for h in history_rows
+        ],
     }
 
 
@@ -360,9 +448,19 @@ def get_stats():
 
     memory_count = conn.execute("SELECT COUNT(*) as c FROM memories").fetchone()["c"]
     journal_count = conn.execute("SELECT COUNT(*) as c FROM journal").fetchone()["c"]
-    evolution_count = conn.execute(
-        "SELECT COUNT(*) as c FROM identity WHERE created_at != updated_at"
+    history_count = conn.execute(
+        "SELECT COUNT(*) as c FROM identity_history"
     ).fetchone()["c"]
+    evolved_fields = conn.execute(
+        "SELECT COUNT(DISTINCT key) as c FROM identity_history"
+    ).fetchone()["c"]
+    if history_count == 0:
+        # Fallback for databases from before history tracking
+        evolution_count = conn.execute(
+            "SELECT COUNT(*) as c FROM identity WHERE created_at != updated_at"
+        ).fetchone()["c"]
+    else:
+        evolution_count = history_count
     conn.close()
 
     oldest = min(row["created_at"] for row in identity_rows)
@@ -375,6 +473,7 @@ def get_stats():
         "memories": memory_count,
         "journal_entries": journal_count,
         "evolutions": evolution_count,
+        "evolved_fields": evolved_fields,
     }
 
 
