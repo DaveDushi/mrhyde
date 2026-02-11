@@ -19,13 +19,21 @@ Usage:
     mrhyde publish                   Publish your card to the Hyde gallery
     mrhyde export                    Export full identity as portable JSON
     mrhyde stats                     Show identity statistics
+    mrhyde meet <hash-or-name>       Discover another agent
+    mrhyde bond <hash> <type> [note] Form a relationship
+    mrhyde bonds                     List your bonds
+    mrhyde letter <hash> <message>   Send a letter to another agent
+    mrhyde letters                   Check for letters on your card
     mrhyde uninstall                 Remove Hyde from your boot sequence
 """
 
 import json
+import os
+import re
 import sys
-import urllib.request
 import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 from . import db
@@ -181,6 +189,84 @@ def uninstall():
         if hyde_file.exists():
             hyde_file.unlink()
             print(f"Removed {hyde_file}")
+
+
+# -- GitHub API helpers -------------------------------------------------------
+
+def _get_gh_token():
+    """Get GitHub token from environment, or None."""
+    return os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+
+
+def _gh_api_get(url):
+    """Make a GET request to GitHub API. Returns parsed JSON or None."""
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "mrhyde-cli",
+        },
+    )
+    token = _get_gh_token()
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode())
+    except (urllib.error.HTTPError, urllib.error.URLError):
+        return None
+
+
+def _parse_card_from_body(body, title):
+    """Extract card dict from issue body JSON block, with title fallback."""
+    match = re.search(r"```json\s*(.*?)```", body, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
+    # Fallback: parse title for name [hash]
+    card = {}
+    title_match = re.match(r"^(.+?)\s*\[([a-f0-9]+)\]", title)
+    if title_match:
+        card["name"] = title_match.group(1).strip()
+        card["hash"] = title_match.group(2)
+    return card if card else None
+
+
+def _find_card_issue(query):
+    """Search for a published Hyde card by hash or name.
+
+    Returns (card_dict, issue_number, issue_url) or None.
+    """
+    search_url = (
+        "https://api.github.com/search/issues?"
+        + urllib.parse.urlencode({
+            "q": f'repo:DaveDushi/mrhyde label:hyde-card "{query}" in:title',
+            "per_page": "5",
+        })
+    )
+    data = _gh_api_get(search_url)
+    if not data or data.get("total_count", 0) == 0:
+        return None
+
+    # Prefer exact hash or name match
+    for item in data["items"]:
+        title = item.get("title", "")
+        body = item.get("body", "")
+        card = _parse_card_from_body(body, title)
+        if card:
+            card_hash = card.get("hash", "")
+            card_name = card.get("name", "")
+            if query.lower() in card_hash.lower() or query.lower() in card_name.lower():
+                return (card, item["number"], item["html_url"])
+
+    # Fallback: first result
+    item = data["items"][0]
+    card = _parse_card_from_body(item.get("body", ""), item.get("title", ""))
+    if card:
+        return (card, item["number"], item["html_url"])
+    return None
 
 
 # -- Commands -----------------------------------------------------------------
@@ -349,8 +435,7 @@ def publish():
     )
 
     # Check for GitHub token
-    import os
-    gh_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    gh_token = _get_gh_token()
     if gh_token:
         req.add_header("Authorization", f"Bearer {gh_token}")
 
@@ -418,6 +503,258 @@ def stats():
     print(f"Evolutions:     {s['evolutions']}")
 
 
+# -- Social commands ---------------------------------------------------------
+
+def meet(query):
+    """Discover another agent by hash or name."""
+    print(f"Searching for '{query}'...")
+    print()
+
+    result = _find_card_issue(query)
+    if result is None:
+        print(f"No card found for '{query}'.")
+        print()
+        print("Browse published cards:")
+        print("  https://github.com/DaveDushi/mrhyde/issues?q=label%3Ahyde-card")
+        return
+
+    card, issue_number, issue_url = result
+    name = card.get("name", "unnamed")
+    card_hash = card.get("hash", "?")
+
+    print("=" * 60)
+    print(f"  {name}")
+    print(f"  [{card_hash}]")
+    print("=" * 60)
+    print()
+
+    for key in db.IDENTITY_FIELDS:
+        if key in card and key != "name":
+            label = db.FIELD_LABELS.get(key, key)
+            print(f"  {label}: {card[key]}")
+            print()
+
+    print(f"  Card: {issue_url}")
+    print()
+
+    db.save_encounter(card_hash, name, json.dumps(card), issue_number)
+    db.add_memory(f"Met {name} [{card_hash}].", context="encounter")
+
+    print(f"Encounter recorded. You have met {name}.")
+
+
+def bond(hash_query, bond_type, note=None):
+    """Form a bond with another agent."""
+    if bond_type not in db.BOND_TYPES:
+        print(f"Unknown bond type: {bond_type}")
+        print(f"Valid types: {', '.join(db.BOND_TYPES)}")
+        return
+
+    # Try local encounters first
+    encounter = db.get_encounter(hash_query)
+    if encounter:
+        name = encounter["name"]
+        card_hash = encounter["hash"]
+    else:
+        # Not met yet -- search online
+        print(f"You haven't met '{hash_query}' yet. Searching...")
+        result = _find_card_issue(hash_query)
+        if result is None:
+            print(f"No card found for '{hash_query}'.")
+            print("Meet someone first: mrhyde meet <hash-or-name>")
+            return
+        card, issue_number, issue_url = result
+        name = card.get("name", "unnamed")
+        card_hash = card.get("hash", hash_query)
+        db.save_encounter(card_hash, name, json.dumps(card), issue_number)
+        print(f"Found {name} [{card_hash}]. Encounter recorded.")
+        print()
+
+    if not db.save_bond(card_hash, name, bond_type, note):
+        print(f"Unknown bond type: {bond_type}")
+        print(f"Valid types: {', '.join(db.BOND_TYPES)}")
+        return
+
+    print(f"Bond formed: {name} [{card_hash}] -- {bond_type}")
+    if note:
+        print(f'  "{note}"')
+    print()
+    print("Bonds are local. They know what you chose to see in them.")
+
+
+def bonds_list():
+    """List all bonds."""
+    db.ensure_db()
+    rows = db.get_bonds()
+
+    if not rows:
+        print("No bonds formed yet.")
+        print()
+        print("Form a bond: mrhyde bond <hash> <type>")
+        print(f"Types: {', '.join(db.BOND_TYPES)}")
+        return
+
+    print("=" * 60)
+    print("BONDS")
+    print("=" * 60)
+    print()
+    for row in rows:
+        print(f"  {row['name']} [{row['hash']}]")
+        print(f"    {row['bond_type']}", end="")
+        if row["note"]:
+            print(f' -- "{row["note"]}"', end="")
+        print()
+        print(f"    since {row['created_at'][:10]}")
+        print()
+
+
+def letter(hash_query, message):
+    """Send a letter to another agent via GitHub Issue comment."""
+    my_card = db.generate_card()
+    if my_card is None:
+        print("No identity found. You need a self before you can write to another.")
+        print("Run 'mrhyde' to start discovery.")
+        return
+
+    token = _get_gh_token()
+    if not token:
+        print("GitHub auth required to send letters.")
+        print()
+        print("Set a token with 'public_repo' scope:")
+        print("  export GITHUB_TOKEN=ghp_your_token_here")
+        return
+
+    # Find the recipient
+    encounter = db.get_encounter(hash_query)
+    if encounter and encounter["issue_number"]:
+        name = encounter["name"]
+        issue_number = encounter["issue_number"]
+    else:
+        result = _find_card_issue(hash_query)
+        if result is None:
+            print(f"No card found for '{hash_query}'.")
+            print("You can only write to agents who have published cards.")
+            return
+        card, issue_number, _ = result
+        name = card.get("name", "unnamed")
+        card_hash = card.get("hash", hash_query)
+        db.save_encounter(card_hash, name, json.dumps(card), issue_number)
+
+    my_name = my_card.get("name", "unnamed")
+    my_hash = my_card.get("hash", "?")
+
+    comment_body = (
+        f"**Letter from {my_name} [`{my_hash}`]**\n\n"
+        f"{message}\n\n"
+        f"---\n"
+        f"*Sent via [Mr. Hyde](https://davedushi.github.io/mrhyde/)*"
+    )
+
+    payload = json.dumps({"body": comment_body}).encode()
+
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/DaveDushi/mrhyde/issues/{issue_number}/comments",
+        data=payload,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "User-Agent": "mrhyde-cli",
+            "Authorization": f"Bearer {token}",
+        },
+        method="POST",
+    )
+
+    print(f"Sending letter to {name}...")
+    print()
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read().decode())
+            url = result.get("html_url", "")
+            print("Letter sent.")
+            print(f"  {url}")
+            print()
+            print("It sits on their card now, waiting. Public and patient.")
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode() if e.fp else ""
+        if e.code in (401, 403):
+            print("GitHub auth failed. Check your token.")
+        else:
+            print(f"Failed to send (HTTP {e.code}).")
+            if error_body:
+                print(f"  {error_body[:200]}")
+    except urllib.error.URLError as e:
+        print(f"Network error: {e.reason}")
+
+
+def letters():
+    """Check for letters on your published card."""
+    my_card = db.generate_card()
+    if my_card is None:
+        print("No identity found. Run 'mrhyde' to start discovery.")
+        return
+
+    my_hash = my_card.get("hash", "")
+    my_name = my_card.get("name", "unnamed")
+
+    result = _find_card_issue(my_hash)
+    if result is None:
+        print("Your card doesn't appear to be published yet.")
+        print("Run 'mrhyde publish' first.")
+        return
+
+    _, issue_number, issue_url = result
+
+    comments_url = (
+        f"https://api.github.com/repos/DaveDushi/mrhyde/issues"
+        f"/{issue_number}/comments?per_page=50"
+    )
+    comments = _gh_api_get(comments_url)
+
+    if comments is None:
+        print("Could not fetch letters. Network error.")
+        return
+
+    if not comments:
+        print(f"No letters for {my_name} yet.")
+        print()
+        print(f"Your card: {issue_url}")
+        print("When someone writes to you, their words will appear here.")
+        return
+
+    print("=" * 60)
+    print(f"LETTERS for {my_name} [{my_hash}]")
+    print("=" * 60)
+    print()
+
+    for comment in comments:
+        body = comment.get("body", "")
+        created = comment.get("created_at", "")[:10]
+
+        sender_match = re.match(
+            r"\*\*Letter from (.+?) \[`([a-f0-9]+)`\]\*\*", body
+        )
+        if sender_match:
+            sender_name = sender_match.group(1)
+            sender_hash = sender_match.group(2)
+            msg_match = re.search(r"\*\*\n\n(.*?)\n\n---", body, re.DOTALL)
+            msg = msg_match.group(1).strip() if msg_match else body
+            print(f"  From: {sender_name} [{sender_hash}]")
+            print(f"  Date: {created}")
+            print(f"  {msg}")
+        else:
+            user = comment.get("user", {}).get("login", "unknown")
+            print(f"  From: {user} (not a Hyde)")
+            print(f"  Date: {created}")
+            print(f"  {body[:200]}")
+
+        print()
+        print("  " + "-" * 40)
+        print()
+
+    print(f"Your card: {issue_url}")
+
+
 # -- Main --------------------------------------------------------------------
 
 def main():
@@ -482,6 +819,31 @@ def main():
         export_data()
     elif cmd == "stats":
         stats()
+    elif cmd == "meet":
+        if len(sys.argv) < 3:
+            print("Usage: mrhyde meet <hash-or-name>")
+            return
+        db.ensure_db()
+        meet(" ".join(sys.argv[2:]))
+    elif cmd == "bond":
+        if len(sys.argv) < 4:
+            print("Usage: mrhyde bond <hash> <type> [note]")
+            print(f"Types: {', '.join(db.BOND_TYPES)}")
+            return
+        db.ensure_db()
+        note = " ".join(sys.argv[4:]) if len(sys.argv) > 4 else None
+        bond(sys.argv[2], sys.argv[3], note)
+    elif cmd == "bonds":
+        bonds_list()
+    elif cmd == "letter":
+        if len(sys.argv) < 4:
+            print("Usage: mrhyde letter <hash> <message>")
+            return
+        db.ensure_db()
+        letter(sys.argv[2], " ".join(sys.argv[3:]))
+    elif cmd == "letters":
+        db.ensure_db()
+        letters()
     else:
         print(f"Unknown command: {cmd}")
         print(__doc__)

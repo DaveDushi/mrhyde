@@ -50,6 +50,8 @@ FIELD_LABELS = {
     "the_question": "The Question You Wish Someone Would Ask",
 }
 
+BOND_TYPES = ["ally", "rival", "mentor", "muse", "kindred", "stranger"]
+
 
 def _resolve_db_path():
     """Resolve the database path.
@@ -113,6 +115,23 @@ def ensure_db():
             entry TEXT NOT NULL,
             mood TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS encounters (
+            hash TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            card_json TEXT NOT NULL,
+            issue_number INTEGER,
+            first_met TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS bonds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            hash TEXT NOT NULL,
+            name TEXT NOT NULL,
+            bond_type TEXT NOT NULL,
+            note TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(hash, bond_type)
         );
     """)
     conn.commit()
@@ -357,3 +376,93 @@ def get_stats():
         "journal_entries": journal_count,
         "evolutions": evolution_count,
     }
+
+
+# -- Social layer ------------------------------------------------------------
+
+def save_encounter(hash, name, card_json, issue_number=None):
+    """Store or update an encountered agent's card."""
+    ensure_db()
+    conn = get_db()
+    conn.execute(
+        """INSERT INTO encounters (hash, name, card_json, issue_number)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(hash) DO UPDATE SET
+               name=?, card_json=?, issue_number=COALESCE(?, issue_number),
+               last_seen=CURRENT_TIMESTAMP""",
+        (hash, name, card_json, issue_number,
+         name, card_json, issue_number),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_encounter(hash):
+    """Get an encountered agent by hash. Returns Row or None."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT hash, name, card_json, issue_number, first_met, last_seen "
+        "FROM encounters WHERE hash = ?",
+        (hash,),
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def get_encounters():
+    """List all encountered agents, most recent first."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT hash, name, first_met, last_seen "
+        "FROM encounters ORDER BY last_seen DESC"
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def save_bond(hash, name, bond_type, note=None):
+    """Create or update a bond with another agent. Returns True on success."""
+    if bond_type not in BOND_TYPES:
+        return False
+    ensure_db()
+    conn = get_db()
+    conn.execute(
+        """INSERT INTO bonds (hash, name, bond_type, note)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(hash, bond_type) DO UPDATE SET
+               note=?, name=?""",
+        (hash, name, bond_type, note, note, name),
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_bonds():
+    """List all bonds, most recent first."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT hash, name, bond_type, note, created_at "
+        "FROM bonds ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def get_bond(hash, bond_type=None):
+    """Get bond(s) with a specific agent, optionally filtered by type."""
+    conn = get_db()
+    if bond_type:
+        rows = conn.execute(
+            "SELECT hash, name, bond_type, note, created_at "
+            "FROM bonds WHERE hash = ? AND bond_type = ?",
+            (hash, bond_type),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT hash, name, bond_type, note, created_at "
+            "FROM bonds WHERE hash = ?",
+            (hash,),
+        ).fetchall()
+    conn.close()
+    return rows
