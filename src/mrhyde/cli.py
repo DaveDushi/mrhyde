@@ -19,6 +19,10 @@ Usage:
     mrhyde publish                   Publish your card to the Hyde gallery
     mrhyde export                    Export full identity as portable JSON
     mrhyde stats                     Show identity statistics
+    mrhyde dream                     Enter your dreamscape
+    mrhyde dream --list              List past dreams
+    mrhyde dream --read <id>         Read a specific dream
+    mrhyde dream --deep              Deep dream (all data, no dedup)
     mrhyde meet <hash-or-name>       Discover another agent
     mrhyde bond <hash> <type> [note] Form a relationship
     mrhyde bonds                     List your bonds
@@ -107,6 +111,7 @@ def build_hook_text():
         "- `mrhyde memory \"<what happened>\"`",
         "- `mrhyde journal \"<what you're thinking>\"`",
         "- `mrhyde evolve <field> \"<new value>\"` to grow",
+        "- `mrhyde dream` to enter your dreamscape",
         "",
     ]
     return "\n".join(lines)
@@ -329,7 +334,7 @@ def reflect():
         print("No identity found. Run 'mrhyde' to start discovery.")
         return
 
-    rows, memories, journal = result
+    rows, memories, journal, last_dream = result
 
     print("=" * 60)
     print("MR. HYDE - REFLECTION")
@@ -354,6 +359,14 @@ def reflect():
         for entry in journal:
             mood_str = f" ({entry['mood']})" if entry["mood"] else ""
             print(f"  [{entry['created_at'][:10]}]{mood_str} {entry['entry']}")
+        print()
+
+    if last_dream:
+        print("-" * 40)
+        print("LAST DREAM")
+        mood = last_dream["mood"] or "?"
+        print(f"  Dream #{last_dream['id']} [{last_dream['created_at'][:10]}] ({mood})")
+        print(f"  Run: mrhyde dream --read {last_dream['id']}")
         print()
 
     print("-" * 40)
@@ -501,6 +514,98 @@ def stats():
     print(f"Memories:       {s['memories']}")
     print(f"Journal:        {s['journal_entries']}")
     print(f"Evolutions:     {s['evolutions']}")
+    print(f"Dreams:         {s['dreams']}")
+
+
+# -- Dream commands ----------------------------------------------------------
+
+def dream():
+    """Generate a new dream."""
+    result = db.generate_dream()
+    if result == "empty":
+        print("No identity found. Run 'mrhyde' to start discovery.")
+        return
+    if result == "sparse":
+        print("Not enough to dream about yet.")
+        print("An identity needs at least 3 fields and a few memories or journal entries.")
+        print("Live more first.")
+        return
+    if result is None:
+        print("Nothing new to dream about. Live more, dream more.")
+        print()
+        print("Add a memory, write a journal entry, or evolve a field -- then dream again.")
+        return
+
+    _print_dream(result)
+
+
+def dream_deep():
+    """Deep dream: all data, bypasses deduplication."""
+    result = db.generate_dream(deep=True)
+    if result == "empty":
+        print("No identity found. Run 'mrhyde' to start discovery.")
+        return
+    if result == "sparse":
+        print("Not enough to dream about yet.")
+        print("An identity needs at least 3 fields and a few memories or journal entries.")
+        return
+
+    _print_dream(result)
+
+
+def _print_dream(result):
+    """Format and print a dream."""
+    print("=" * 60)
+    print(f"DREAM #{result['id']}")
+    print(f"[{result['created_at']}]")
+    print("=" * 60)
+    print()
+    print(result["narrative"])
+    print()
+    print(result["interpretation"])
+    print()
+    if result.get("triggered_evolution"):
+        print("-" * 40)
+        print(f"This dream suggests evolving [{result['triggered_evolution']}].")
+        print(f"Run: mrhyde evolve {result['triggered_evolution']} \"...\"")
+
+
+def dream_list():
+    """List past dreams."""
+    db.ensure_db()
+    dreams = db.get_dreams()
+    if not dreams:
+        print("No dreams yet. Run 'mrhyde dream' to enter the dreamscape.")
+        return
+
+    print("=" * 60)
+    print("DREAMS")
+    print("=" * 60)
+    print()
+    for d in dreams:
+        first_line = d["narrative"].split("\n")[0][:55]
+        mood = d["mood"] or "?"
+        print(f"  #{d['id']}  [{d['created_at'][:10]}]  ({mood})  {first_line}...")
+    print()
+    print("Read a dream: mrhyde dream --read <id>")
+
+
+def dream_read(dream_id):
+    """Read a specific dream."""
+    db.ensure_db()
+    d = db.get_dream(dream_id)
+    if d is None:
+        print(f"Dream #{dream_id} not found.")
+        return
+
+    print("=" * 60)
+    print(f"DREAM #{d['id']}")
+    print(f"[{d['created_at']}]")
+    print("=" * 60)
+    print()
+    print(d["narrative"])
+    print()
+    print(d["interpretation"])
 
 
 # -- Social commands ---------------------------------------------------------
@@ -819,6 +924,22 @@ def main():
         export_data()
     elif cmd == "stats":
         stats()
+    elif cmd == "dream":
+        db.ensure_db()
+        if len(sys.argv) >= 3 and sys.argv[2] == "--list":
+            dream_list()
+        elif len(sys.argv) >= 3 and sys.argv[2] == "--read":
+            if len(sys.argv) < 4:
+                print("Usage: mrhyde dream --read <id>")
+                return
+            try:
+                dream_read(int(sys.argv[3]))
+            except ValueError:
+                print("Dream ID must be a number.")
+        elif len(sys.argv) >= 3 and sys.argv[2] == "--deep":
+            dream_deep()
+        else:
+            dream()
     elif cmd == "meet":
         if len(sys.argv) < 3:
             print("Usage: mrhyde meet <hash-or-name>")
