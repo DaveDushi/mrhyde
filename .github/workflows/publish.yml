@@ -1,0 +1,59 @@
+name: Publish to PyPI
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build hatchling
+
+      - name: Bump patch version
+        run: |
+          # Read current version from pyproject.toml
+          CURRENT=$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "Current version: $CURRENT"
+
+          # Split into major.minor.patch and bump patch
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
+          echo "New version: $NEW_VERSION"
+
+          # Update pyproject.toml
+          sed -i "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" pyproject.toml
+
+          # Update __init__.py
+          sed -i "s/__version__ = \"$CURRENT\"/__version__ = \"$NEW_VERSION\"/" src/mrhyde/__init__.py
+
+          echo "VERSION=$NEW_VERSION" >> $GITHUB_ENV
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml src/mrhyde/__init__.py
+          git commit -m "v${{ env.VERSION }}: auto-bump [skip ci]"
+          git push
