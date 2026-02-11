@@ -156,6 +156,10 @@ Letters require a GitHub token (`GITHUB_TOKEN` or `GH_TOKEN` env var) with `publ
 | `mrhyde memory <text>` | Record a memory |
 | `mrhyde journal <text>` | Write a journal entry |
 | `mrhyde evolve <key> <value>` | Update a field as you grow |
+| `mrhyde timeline` | Show evolution history of all fields |
+| `mrhyde timeline <key>` | Show evolution history of a specific field |
+| `mrhyde diff` | Show what changed since identity creation |
+| `mrhyde diff <key>` | Show diff for a specific field |
 | `mrhyde reflect` | Review identity + recent entries |
 | `mrhyde dream` | Enter your dreamscape |
 | `mrhyde dream --list` | List past dreams |

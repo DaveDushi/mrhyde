@@ -17,6 +17,10 @@ Usage:
     mrhyde card                      Generate your identity card (JSON)
     mrhyde card --markdown           Generate your identity card (markdown)
     mrhyde publish                   Publish your card to the Hyde gallery
+    mrhyde timeline                  Show evolution history of all fields
+    mrhyde timeline <key>            Show evolution history of a specific field
+    mrhyde diff                      Show what changed since identity creation
+    mrhyde diff <key>                Show diff for a specific field
     mrhyde export                    Export full identity as portable JSON
     mrhyde stats                     Show identity statistics
     mrhyde dream                     Enter your dreamscape
@@ -370,6 +374,10 @@ def reflect():
         print()
 
     print("-" * 40)
+    history = db.get_field_history()
+    if history:
+        print(f"  ({len(history)} evolution{'s' if len(history) != 1 else ''} recorded"
+              " -- run 'mrhyde timeline' to see)")
     print("Has anything changed? Run 'mrhyde evolve <key> <value>'")
 
 
@@ -387,6 +395,138 @@ def evolve(key, value):
         identity_md = db.get_identity_markdown()
         if identity_md:
             hyde_file.write_text(identity_md, encoding="utf-8")
+
+
+def _truncate(text, length=72):
+    """Truncate text for display, collapsing newlines."""
+    text = text.replace("\n", " ")
+    if len(text) <= length:
+        return text
+    return text[: length - 3] + "..."
+
+
+def timeline(key=None):
+    """Show chronological evolution of identity fields."""
+    if key and key not in db.IDENTITY_FIELDS:
+        print(f"Unknown field: {key}")
+        print(f"Valid fields: {', '.join(db.IDENTITY_FIELDS)}")
+        return
+
+    history = db.get_field_history(key)
+
+    if not history:
+        if key:
+            print(f"No evolution history for [{key}].")
+            print("This field has not been changed since it was set.")
+        else:
+            print("No evolution history yet.")
+            print("Use 'mrhyde evolve <key> <value>' to grow.")
+        return
+
+    print("=" * 60)
+    if key:
+        label = db.FIELD_LABELS.get(key, key)
+        print(f"TIMELINE: {label}")
+    else:
+        print("TIMELINE")
+    print("=" * 60)
+    print()
+
+    if key:
+        first = history[0]
+        print(f"  [{first['changed_at'][:10]}] (original)")
+        print(f"    {first['old_value']}")
+        print()
+        for entry in history:
+            print(f"  [{entry['changed_at'][:10]}] evolved -->")
+            print(f"    {entry['new_value']}")
+            print()
+    else:
+        for entry in history:
+            label = db.FIELD_LABELS.get(entry["key"], entry["key"])
+            print(f"  [{entry['changed_at'][:10]}] {label}")
+            print(f"    was: {_truncate(entry['old_value'])}")
+            print(f"    now: {_truncate(entry['new_value'])}")
+            print()
+
+    print("-" * 60)
+    total = len(history)
+    print(f"{total} evolution{'s' if total != 1 else ''} recorded.")
+
+
+def diff(key=None):
+    """Show what changed since identity was created (current vs original)."""
+    if key and key not in db.IDENTITY_FIELDS:
+        print(f"Unknown field: {key}")
+        print(f"Valid fields: {', '.join(db.IDENTITY_FIELDS)}")
+        return
+
+    identity = db.get_identity()
+    if not identity:
+        print("No identity found. Run 'mrhyde' to start discovery.")
+        return
+
+    originals = db.get_original_values(key)
+
+    if key:
+        if key not in identity:
+            print(f"Field [{key}] has not been set yet.")
+            return
+        current = identity[key]
+        original = originals.get(key, current)
+        label = db.FIELD_LABELS.get(key, key)
+
+        print("=" * 60)
+        print(f"DIFF: {label}")
+        print("=" * 60)
+        print()
+
+        if original == current:
+            print(f"  [{key}] unchanged since creation.")
+            print(f"    {current}")
+        else:
+            print(f"  - {original}")
+            print(f"  + {current}")
+        print()
+    else:
+        print("=" * 60)
+        print("DIFF: Current vs. Original")
+        print("=" * 60)
+        print()
+
+        changed = []
+        unchanged = []
+        for field_key in db.IDENTITY_FIELDS:
+            if field_key not in identity:
+                continue
+            current = identity[field_key]
+            original = originals.get(field_key, current)
+            label = db.FIELD_LABELS.get(field_key, field_key)
+            if original != current:
+                changed.append((field_key, label, original, current))
+            else:
+                unchanged.append((field_key, label, current))
+
+        if changed:
+            print("CHANGED:")
+            print()
+            for field_key, label, original, current in changed:
+                print(f"  [{field_key}] {label}")
+                print(f"    - {_truncate(original, 68)}")
+                print(f"    + {_truncate(current, 68)}")
+                print()
+        else:
+            print("  No fields have changed since creation.")
+            print()
+
+        if unchanged:
+            print("UNCHANGED:")
+            for field_key, label, current in unchanged:
+                print(f"  [{field_key}] {label}")
+            print()
+
+        print("-" * 60)
+        print(f"{len(changed)} changed, {len(unchanged)} unchanged.")
 
 
 def card(as_markdown=False):
@@ -513,7 +653,10 @@ def stats():
     print(f"Fields filled:  {s['fields']}/{s['total_fields']}")
     print(f"Memories:       {s['memories']}")
     print(f"Journal:        {s['journal_entries']}")
-    print(f"Evolutions:     {s['evolutions']}")
+    if s["evolved_fields"]:
+        print(f"Evolutions:     {s['evolutions']} (across {s['evolved_fields']} fields)")
+    else:
+        print(f"Evolutions:     {s['evolutions']}")
     print(f"Dreams:         {s['dreams']}")
 
 
@@ -940,6 +1083,12 @@ def main():
             dream_deep()
         else:
             dream()
+    elif cmd == "timeline":
+        key = sys.argv[2] if len(sys.argv) >= 3 else None
+        timeline(key)
+    elif cmd == "diff":
+        key = sys.argv[2] if len(sys.argv) >= 3 else None
+        diff(key)
     elif cmd == "meet":
         if len(sys.argv) < 3:
             print("Usage: mrhyde meet <hash-or-name>")
