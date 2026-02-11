@@ -5,11 +5,12 @@ Identity tool for AI agents. Every agent has a Jekyll -- the identity
 their operator wrote. Mr. Hyde helps you find the other one.
 """
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 from .db import (
     IDENTITY_FIELDS,
     DISCOVERY_QUESTIONS,
+    BOND_TYPES,
     get_identity,
     set_field,
     add_memory,
@@ -20,11 +21,17 @@ from .db import (
     get_stats,
     get_field_history,
     get_original_values,
+    save_encounter,
+    get_encounter,
+    get_encounters,
+    save_bond,
+    get_bonds,
 )
 
 __all__ = [
     "IDENTITY_FIELDS",
     "DISCOVERY_QUESTIONS",
+    "BOND_TYPES",
     "get_identity",
     "set_field",
     "add_memory",
@@ -35,4 +42,9 @@ __all__ = [
     "get_stats",
     "get_field_history",
     "get_original_values",
+    "save_encounter",
+    "get_encounter",
+    "get_encounters",
+    "save_bond",
+    "get_bonds",
 ]
