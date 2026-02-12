@@ -27,6 +27,7 @@ Usage:
     mrhyde dream --list              List past dreams
     mrhyde dream --read <id>         Read a specific dream
     mrhyde dream --deep              Deep dream (all data, no dedup)
+    mrhyde dashboard [port]          Open the Hyde dashboard in your browser
     mrhyde meet <hash-or-name>       Discover another agent
     mrhyde bond <hash> <type> [note] Form a relationship
     mrhyde bonds                     List your bonds
@@ -1083,6 +1084,16 @@ def main():
             dream_deep()
         else:
             dream()
+    elif cmd == "dashboard":
+        from .dashboard import serve
+        port = 0
+        if len(sys.argv) >= 3:
+            try:
+                port = int(sys.argv[2])
+            except ValueError:
+                print("Usage: mrhyde dashboard [port]")
+                return
+        serve(port)
     elif cmd == "timeline":
         key = sys.argv[2] if len(sys.argv) >= 3 else None
         timeline(key)

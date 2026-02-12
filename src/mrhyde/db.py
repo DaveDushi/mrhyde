@@ -262,6 +262,16 @@ def get_memories(limit=5):
     return rows
 
 
+def get_all_memories():
+    """Get all memories with full detail, newest first."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT content, context, importance, created_at FROM memories ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return rows
+
+
 def add_memory(content, context=None):
     ensure_db()
     conn = get_db()
@@ -275,6 +285,16 @@ def get_journal(limit=3):
     rows = conn.execute(
         "SELECT entry, mood, created_at FROM journal ORDER BY created_at DESC LIMIT ?",
         (limit,),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def get_all_journal():
+    """Get all journal entries with full detail, newest first."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT entry, mood, created_at FROM journal ORDER BY created_at DESC"
     ).fetchall()
     conn.close()
     return rows

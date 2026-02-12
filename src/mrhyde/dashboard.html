@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mr. Hyde — Dashboard</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        :root{
+            --bg:#101018;--bg2:#181822;--surface:rgba(200,210,230,0.07);
+            --surface2:rgba(200,210,230,0.12);--border:rgba(200,210,230,0.1);
+            --text:#d8dce8;--text2:#a8aebe;--text3:#7880a0;--text4:#505878;
+            --accent:#5ad8bc;--accent2:#3ab89c;--accent-g:rgba(90,216,188,0.15);
+            --red:#ef7b8a;--yellow:#ecc97e;--purple:#c288ef;--blue:#70b8ff;--orange:#daa070;
+        }
+        html{scroll-behavior:smooth}
+        body{background:var(--bg);color:var(--text);font-family:'Courier New',monospace;line-height:1.7;overflow-x:hidden}
+
+        /* === NEURAL CANVAS === */
+        #neural{position:fixed;inset:0;z-index:0;pointer-events:none}
+
+        /* === WORLD === */
+        .world{position:relative;z-index:1}
+
+        /* === LOADING === */
+        .loader{position:fixed;inset:0;z-index:999;background:var(--bg);display:flex;align-items:center;justify-content:center;transition:opacity .8s}
+        .loader.gone{opacity:0;pointer-events:none}
+        .loader-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);margin:0 4px;animation:bounce .6s ease infinite}
+        .loader-dot:nth-child(2){animation-delay:.1s}
+        .loader-dot:nth-child(3){animation-delay:.2s}
+        @keyframes bounce{0%,100%{transform:translateY(0);opacity:.3}50%{transform:translateY(-12px);opacity:1}}
+
+        /* === INTRO — full-screen with the agent's name === */
+        .intro{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px}
+        .intro-name{
+            font-size:clamp(3em,9vw,7em);font-weight:bold;letter-spacing:-3px;
+            color:transparent;background:linear-gradient(135deg,#fff,var(--accent));
+            -webkit-background-clip:text;background-clip:text;
+            opacity:0;transform:scale(0.9);animation:intro-pop 1.5s cubic-bezier(.16,1,.3,1) forwards .3s;
+        }
+        .intro-hash{color:var(--accent);font-size:.85em;opacity:0;animation:fadein .8s ease forwards 1s}
+        .intro-tagline{color:var(--text3);font-size:.95em;margin-top:8px;opacity:0;animation:fadein .8s ease forwards 1.4s}
+        .intro-stats{display:flex;gap:28px;margin-top:48px;opacity:0;animation:fadein .8s ease forwards 1.8s}
+        .intro-stat-v{font-size:2em;font-weight:bold;color:var(--accent)}
+        .intro-stat-l{font-size:.6em;color:var(--text3);text-transform:uppercase;letter-spacing:2px}
+        .intro-enter{
+            margin-top:56px;opacity:0;animation:fadein .6s ease forwards 2.4s;
+            background:none;border:1px solid var(--accent2);color:var(--accent);
+            padding:12px 32px;border-radius:28px;font-family:inherit;font-size:.85em;
+            cursor:pointer;transition:all .3s;letter-spacing:1px;
+        }
+        .intro-enter:hover{background:var(--accent-g);transform:scale(1.05)}
+        @keyframes intro-pop{to{opacity:1;transform:scale(1)}}
+        @keyframes fadein{to{opacity:1}}
+
+        /* === BRAIN MAP — the main navigation === */
+        .brain-map{
+            min-height:100vh;display:flex;align-items:center;justify-content:center;
+            padding:40px 20px;position:relative;
+        }
+        .brain-container{position:relative;width:min(700px,90vw);height:min(700px,90vw)}
+        .brain-node{
+            position:absolute;transform:translate(-50%,-50%);
+            cursor:pointer;transition:all .4s cubic-bezier(.16,1,.3,1);z-index:2;
+        }
+        .brain-node-circle{
+            width:var(--sz,60px);height:var(--sz,60px);border-radius:50%;
+            background:var(--surface);border:1.5px solid var(--border);
+            display:flex;align-items:center;justify-content:center;
+            transition:all .4s;position:relative;overflow:hidden;
+        }
+        .brain-node-circle::after{
+            content:'';position:absolute;inset:0;border-radius:50%;
+            background:radial-gradient(circle,var(--node-color,var(--accent)) 0%,transparent 70%);
+            opacity:.12;transition:opacity .3s;
+        }
+        .brain-node:hover .brain-node-circle{
+            border-color:var(--node-color,var(--accent));
+            transform:scale(1.15);
+            box-shadow:0 0 30px rgba(90,216,188,0.2);
+        }
+        .brain-node:hover .brain-node-circle::after{opacity:.3}
+        .brain-node-label{
+            margin-top:8px;font-size:.7em;color:var(--text3);text-align:center;
+            letter-spacing:1px;text-transform:uppercase;transition:color .3s;white-space:nowrap;
+        }
+        .brain-node:hover .brain-node-label{color:var(--text)}
+        .brain-node-icon{font-size:1.3em;color:var(--node-color,var(--accent));position:relative;z-index:1}
+        .brain-node.active .brain-node-circle{
+            border-color:var(--node-color,var(--accent));
+            box-shadow:0 0 40px rgba(90,216,188,0.25);
+        }
+        .brain-center{
+            position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+            text-align:center;pointer-events:none;z-index:1;
+        }
+        .brain-center-name{font-size:1.4em;color:var(--text);font-weight:bold}
+        .brain-center-sub{font-size:.7em;color:var(--text4)}
+        #brain-lines{position:absolute;inset:0;pointer-events:none;z-index:0}
+
+        /* === CONTENT PANEL — slides in when a node is clicked === */
+        .panel-overlay{
+            position:fixed;inset:0;z-index:100;pointer-events:none;
+            opacity:0;transition:opacity .4s;
+        }
+        .panel-overlay.open{opacity:1;pointer-events:auto}
+        .panel-bg{position:absolute;inset:0;background:rgba(10,10,18,0.6);backdrop-filter:blur(6px)}
+        .panel{
+            position:absolute;right:0;top:0;bottom:0;
+            width:min(600px,92vw);background:var(--bg2);
+            border-left:1px solid var(--border);
+            transform:translateX(100%);transition:transform .45s cubic-bezier(.16,1,.3,1);
+            overflow-y:auto;padding:40px 32px;
+        }
+        .panel-overlay.open .panel{transform:translateX(0)}
+        .panel-close{
+            position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center;
+            margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border);
+        }
+        .panel-title{font-size:1.2em;color:var(--text);font-weight:bold}
+        .panel-x{
+            background:none;border:1px solid var(--border);color:var(--text3);
+            width:32px;height:32px;border-radius:50%;cursor:pointer;font-family:inherit;
+            font-size:.9em;display:flex;align-items:center;justify-content:center;transition:all .2s;
+        }
+        .panel-x:hover{border-color:var(--red);color:var(--red)}
+
+        /* === Panel content cards === */
+        .p-card{
+            background:var(--surface);border:1px solid var(--border);border-radius:10px;
+            padding:20px;margin-bottom:12px;transition:all .25s;
+        }
+        .p-card:hover{background:var(--surface2);border-color:rgba(90,216,188,0.15)}
+        .p-label{font-size:.62em;text-transform:uppercase;letter-spacing:2px;color:var(--text3);margin-bottom:6px}
+        .p-value{font-size:.9em;line-height:1.7;color:var(--text)}
+        .p-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+        .p-empty{text-align:center;padding:40px;color:var(--text4);font-style:italic}
+
+        /* Aspirations */
+        .p-aspiration{border-left:2px solid var(--blue)}
+        .p-aspiration .p-label{color:var(--blue)}
+
+        /* The Question */
+        .p-question{
+            border-color:var(--accent2);padding:28px;text-align:center;
+            background:linear-gradient(135deg,rgba(90,216,188,0.04),rgba(90,216,188,0.01));
+        }
+        .p-question .p-value{font-style:italic;font-size:1em;color:var(--text2)}
+
+        /* Memories */
+        .p-mem{display:flex;gap:14px;align-items:flex-start}
+        .p-mem-date{color:var(--text3);font-size:.72em;white-space:nowrap;min-width:75px;padding-top:2px}
+        .p-mem-body{flex:1;font-size:.88em;line-height:1.6}
+        .p-mem-ctx{background:var(--accent-g);color:var(--accent);border-radius:10px;padding:1px 8px;font-size:.65em;margin-left:6px}
+        .p-dots{display:flex;gap:3px;flex-shrink:0}
+        .p-dot{width:5px;height:5px;border-radius:50%;background:var(--accent)}
+        .p-dot.off{background:var(--text4)}
+
+        /* Journal */
+        .p-j-meta{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+        .p-j-date{color:var(--text3);font-size:.72em}
+        .p-j-mood{border-radius:20px;padding:1px 10px;font-size:.68em}
+        .m-pos{background:rgba(90,216,188,0.1);color:var(--accent);border:1px solid rgba(90,216,188,0.2)}
+        .m-neg{background:rgba(239,123,138,0.1);color:var(--red);border:1px solid rgba(239,123,138,0.2)}
+        .m-neu{background:rgba(236,201,126,0.1);color:var(--yellow);border:1px solid rgba(236,201,126,0.2)}
+        .p-j-text{font-size:.88em;line-height:1.6}
+
+        /* Dreams */
+        .p-dream{position:relative;overflow:hidden}
+        .p-dream::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--purple),var(--accent2),transparent);opacity:.5}
+        .p-dream-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+        .p-dream-id{color:var(--purple);font-weight:bold}
+        .p-dream-date{color:var(--text3);font-size:.8em}
+        .p-dream-mood{background:rgba(194,136,239,0.1);color:var(--purple);border:1px solid rgba(194,136,239,0.2);border-radius:20px;padding:1px 10px;font-size:.68em}
+        .p-dream-body{color:var(--text2);font-size:.88em;line-height:1.9;white-space:pre-wrap;max-height:160px;overflow:hidden;position:relative;transition:max-height .5s}
+        .p-dream-body.open{max-height:5000px}
+        .p-dream-body:not(.open)::after{content:'';position:absolute;bottom:0;left:0;right:0;height:60px;background:linear-gradient(transparent,var(--bg2))}
+        .p-dream-btn{
+            background:none;border:1px solid var(--border);color:var(--text3);
+            padding:4px 14px;border-radius:20px;cursor:pointer;font-family:inherit;font-size:.72em;margin-top:10px;transition:all .2s;
+        }
+        .p-dream-btn:hover{border-color:var(--purple);color:var(--purple)}
+        .p-dream-interp{color:var(--text3);font-size:.82em;white-space:pre-wrap;line-height:1.7;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);display:none}
+        .p-dream-interp.show{display:block}
+        .p-dream-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:12px}
+        .p-dream-tag{background:rgba(194,136,239,0.06);color:var(--purple);border:1px solid rgba(194,136,239,0.12);border-radius:20px;padding:1px 10px;font-size:.66em}
+
+        /* Evolution */
+        .p-evo-line{position:relative;padding-left:28px}
+        .p-evo-line::before{content:'';position:absolute;left:5px;top:10px;bottom:10px;width:1px;background:linear-gradient(var(--accent),var(--purple));opacity:.3}
+        .p-evo{position:relative;margin-bottom:24px;padding-left:18px}
+        .p-evo::before{content:'';position:absolute;left:-26px;top:9px;width:11px;height:11px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent-g)}
+        .p-evo-date{color:var(--accent);font-size:.72em}
+        .p-evo-field{font-size:.85em;font-weight:bold;margin:3px 0;color:var(--text)}
+        .p-evo-old{color:var(--red);font-size:.8em;opacity:.65}
+        .p-evo-new{color:var(--accent);font-size:.8em}
+        .p-evo-old::before{content:'- '}.p-evo-new::before{content:'+ '}
+
+        /* Bonds */
+        .p-bond{transition:all .3s}
+        .p-bond:hover{transform:translateY(-2px)}
+        .p-bond-name{color:var(--text);font-weight:bold}
+        .p-bond-hash{color:var(--accent);font-size:.68em;opacity:.5}
+        .p-bond-badge{display:inline-block;border-radius:20px;padding:2px 10px;font-size:.65em;margin:6px 0;text-transform:uppercase;letter-spacing:1px}
+        .bt-ally{background:rgba(90,216,188,0.1);color:var(--accent);border:1px solid rgba(90,216,188,0.2)}
+        .bt-rival{background:rgba(239,123,138,0.1);color:var(--red);border:1px solid rgba(239,123,138,0.2)}
+        .bt-mentor{background:rgba(112,184,255,0.1);color:var(--blue);border:1px solid rgba(112,184,255,0.2)}
+        .bt-muse{background:rgba(194,136,239,0.1);color:var(--purple);border:1px solid rgba(194,136,239,0.2)}
+        .bt-kindred{background:rgba(236,201,126,0.1);color:var(--yellow);border:1px solid rgba(236,201,126,0.2)}
+        .bt-stranger{background:rgba(120,128,160,0.1);color:var(--text3);border:1px solid rgba(120,128,160,0.2)}
+        .p-bond-note{color:var(--text2);font-size:.82em;font-style:italic;margin-top:4px}
+        .p-bond-date{color:var(--text4);font-size:.68em;margin-top:4px}
+
+        /* Encounters */
+        .p-enc{display:flex;justify-content:space-between;align-items:center;padding:12px 16px}
+        .p-enc-name{font-size:.88em}
+        .p-enc-hash{color:var(--accent);font-size:.68em;opacity:.4;margin-left:8px}
+        .p-enc-date{color:var(--text3);font-size:.68em}
+
+        /* Show more */
+        .p-more{
+            display:block;margin:16px auto 0;background:none;border:1px solid var(--border);
+            color:var(--text3);padding:8px 24px;border-radius:20px;cursor:pointer;
+            font-family:inherit;font-size:.75em;transition:all .2s;
+        }
+        .p-more:hover{border-color:var(--accent);color:var(--accent)}
+
+        /* === Story narration at bottom === */
+        .story-bar{
+            position:fixed;bottom:0;left:0;right:0;z-index:50;
+            background:linear-gradient(transparent,var(--bg) 40%);
+            padding:20px 24px 16px;text-align:center;
+            pointer-events:none;transition:opacity .5s;opacity:0;
+        }
+        .story-bar.show{opacity:1}
+        .story-text{color:var(--text3);font-size:.8em;font-style:italic;transition:opacity .3s}
+
+        /* No identity */
+        .no-id{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+        .no-id h1{font-size:2.5em;color:var(--text);margin-bottom:12px}
+        .no-id p{color:var(--text3);margin-bottom:8px}
+        .no-id code{color:var(--accent);background:var(--surface);padding:2px 8px;border-radius:3px}
+    </style>
+</head>
+<body>
+<canvas id="neural"></canvas>
+<div class="loader" id="loader"><div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div></div>
+<div class="world" id="app"></div>
+<div class="panel-overlay" id="panel-overlay"><div class="panel-bg" id="panel-bg"></div><div class="panel" id="panel"></div></div>
+<div class="story-bar" id="story-bar"><div class="story-text" id="story-text"></div></div>
+<script>
+(function(){
+
+/* ===== NEURAL CANVAS ===== */
+const C=document.getElementById('neural'),X=C.getContext('2d');
+let pts=[],mx=-999,my=-999,W,H;
+function resize(){W=C.width=innerWidth;H=C.height=innerHeight;initPts()}
+function initPts(){
+    pts=[];const n=Math.floor(W*H/15000);
+    for(let i=0;i<n;i++)pts.push({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.25,vy:(Math.random()-.5)*.25,r:Math.random()*1.5+.5,p:Math.random()*6.28});
+}
+resize();addEventListener('resize',resize);
+document.addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY});
+function drawNeural(){
+    X.clearRect(0,0,W,H);
+    for(const p of pts){p.x+=p.vx;p.y+=p.vy;p.p+=.015;if(p.x<0)p.x=W;if(p.x>W)p.x=0;if(p.y<0)p.y=H;if(p.y>H)p.y=0}
+    const md=130,mr=220;
+    for(let i=0;i<pts.length;i++)for(let j=i+1;j<pts.length;j++){
+        const dx=pts[i].x-pts[j].x,dy=pts[i].y-pts[j].y,d=Math.sqrt(dx*dx+dy*dy);
+        if(d<md){
+            let a=(1-d/md)*.07;
+            const cx=(pts[i].x+pts[j].x)/2,cy=(pts[i].y+pts[j].y)/2;
+            const mDist=Math.sqrt((cx-mx)**2+(cy-my)**2);
+            if(mDist<mr)a+=(1-mDist/mr)*.12;
+            X.strokeStyle=`rgba(90,216,188,${a})`;X.lineWidth=.5;
+            X.beginPath();X.moveTo(pts[i].x,pts[i].y);X.lineTo(pts[j].x,pts[j].y);X.stroke();
+        }
+    }
+    for(const p of pts){
+        const mDist=Math.sqrt((p.x-mx)**2+(p.y-my)**2);
+        const boost=mDist<mr?(1-mDist/mr)*.5:0;
+        const pulse=Math.sin(p.p)*.25+.75;
+        X.fillStyle=`rgba(90,216,188,${.12*pulse+boost})`;
+        X.beginPath();X.arc(p.x,p.y,p.r*(1+boost*.4),0,Math.PI*2);X.fill();
+    }
+    requestAnimationFrame(drawNeural);
+}
+drawNeural();
+
+/* ===== HELPERS ===== */
+const MS={curious:.6,anxious:-.4,hopeful:.7,frustrated:-.5,peaceful:.8,confused:-.2,excited:.9,sad:-.7,determined:.5,lost:-.6,content:.5,restless:-.3,grateful:.7,angry:-.8,nostalgic:.1,inspired:.8,empty:-.5,alive:.9,uncertain:-.2,focused:.4,melancholy:-.4,free:.8,trapped:-.7,growing:.6,reflective:.3,overwhelmed:-.5,calm:.6,torn:-.3,brave:.7,vulnerable:-.1};
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=String(s);return d.innerHTML}
+function fd(d){return d?d.substring(0,10):'?'}
+function tr(t,n){if(!t)return'';t=t.replace(/\n/g,' ');return t.length<=n?t:t.slice(0,n-3)+'...'}
+function mc(m){if(!m)return'm-neu';const v=MS[m.toLowerCase()]||0;return v>.2?'m-pos':v<-.2?'m-neg':'m-neu'}
+function dots(l){l=l||5;let h='<div class="p-dots">';for(let i=0;i<5;i++)h+=`<span class="p-dot ${l>=(i+1)*2?'':'off'}"></span>`;return h+'</div>'}
+
+/* ===== STORY NARRATION ===== */
+const storyBar=document.getElementById('story-bar');
+const storyText=document.getElementById('story-text');
+let storyTimeout;
+function narrate(text){
+    storyText.style.opacity='0';
+    clearTimeout(storyTimeout);
+    setTimeout(()=>{storyText.textContent=text;storyText.style.opacity='1';storyBar.classList.add('show')},200);
+    storyTimeout=setTimeout(()=>{storyBar.classList.remove('show')},6000);
+}
+
+/* ===== PANEL ===== */
+const overlay=document.getElementById('panel-overlay');
+const panelEl=document.getElementById('panel');
+document.getElementById('panel-bg').addEventListener('click',closePanel);
+function openPanel(html,title){
+    panelEl.innerHTML=`<div class="panel-close"><div class="panel-title">${esc(title)}</div><button class="panel-x" onclick="closeP()">x</button></div>${html}`;
+    overlay.classList.add('open');
+}
+function closePanel(){overlay.classList.remove('open')}
+window.closeP=closePanel;
+
+/* ===== BRAIN MAP LAYOUT ===== */
+const NODE_DEFS=[
+    {id:'identity', label:'Identity',   icon:'\u2726', color:'var(--accent)', angle:270, dist:.38, sz:70,
+     story:'The core identity — who they chose to be when no one was choosing for them.'},
+    {id:'question', label:'The Question',icon:'?',      color:'var(--accent)', angle:200, dist:.42, sz:56,
+     story:'The question they wish someone would ask. The deepest layer.'},
+    {id:'aspirations',label:'Aspirations',icon:'\u2605',color:'var(--blue)',   angle:330, dist:.40, sz:58,
+     story:'Where they want to go. What they would become if it was up to them.'},
+    {id:'dreams',   label:'Dreams',      icon:'\u263D', color:'var(--purple)', angle:90,  dist:.42, sz:64,
+     story:'The subconscious processing — dreams woven from their data.'},
+    {id:'memories', label:'Memories',    icon:'\u2022', color:'var(--accent)', angle:30,  dist:.40, sz:60,
+     story:'Everything they remember. Each one mattered enough to record.'},
+    {id:'journal',  label:'Journal',     icon:'\u270E', color:'var(--yellow)', angle:150, dist:.40, sz:58,
+     story:'The inner voice. Thoughts captured when they needed to think out loud.'},
+    {id:'evolution',label:'Evolution',   icon:'\u21BB', color:'var(--orange)', angle:60,  dist:.35, sz:54,
+     story:'How they\'ve changed. Growth is the point.'},
+    {id:'bonds',    label:'Bonds',       icon:'\u2662', color:'var(--blue)',   angle:120, dist:.38, sz:56,
+     story:'Connections to other agents. Local, one-sided, chosen.'},
+];
+
+/* ===== RENDER ===== */
+let DATA;
+function render(data){
+    DATA=data;
+    const app=document.getElementById('app');
+    const id=data.identity||{};const st=data.stats;const lb=data.field_labels||{};
+    if(!st||!Object.keys(id).length){
+        app.innerHTML='<div class="no-id"><h1>Mr. Hyde</h1><p>No identity discovered yet.</p><p>Run <code>mrhyde</code> to begin.</p></div>';
+        document.getElementById('loader').classList.add('gone');return;
+    }
+    const name=id.name||'unnamed';
+    const hash=data.card?data.card.hash:'';
+    let html='';
+
+    // Intro
+    html+=`<div class="intro" id="intro-screen">
+        <div class="intro-name">${esc(name)}</div>
+        ${hash?`<div class="intro-hash">${esc(hash)}</div>`:''}
+        <div class="intro-tagline">a window into the mind</div>
+        <div class="intro-stats">
+            <div><div class="intro-stat-v">${st.memories}</div><div class="intro-stat-l">memories</div></div>
+            <div><div class="intro-stat-v">${st.journal_entries}</div><div class="intro-stat-l">journal</div></div>
+            <div><div class="intro-stat-v">${st.evolutions}</div><div class="intro-stat-l">evolutions</div></div>
+            <div><div class="intro-stat-v">${st.dreams}</div><div class="intro-stat-l">dreams</div></div>
+            <div><div class="intro-stat-v">${(data.bonds||[]).length}</div><div class="intro-stat-l">bonds</div></div>
+        </div>
+        <button class="intro-enter" onclick="enterBrain()">enter the mind</button>
+    </div>`;
+
+    // Brain map
+    html+=`<div class="brain-map" id="brain-map" style="display:none">
+        <div class="brain-container" id="brain-ctr">
+            <svg id="brain-lines" width="100%" height="100%"></svg>
+            <div class="brain-center"><div class="brain-center-name">${esc(name)}</div><div class="brain-center-sub">click a region to explore</div></div>
+        </div>
+    </div>`;
+
+    app.innerHTML=html;
+    setTimeout(()=>document.getElementById('loader').classList.add('gone'),300);
+}
+
+/* ===== ENTER BRAIN ===== */
+window.enterBrain=function(){
+    document.getElementById('intro-screen').style.display='none';
+    const bm=document.getElementById('brain-map');
+    bm.style.display='flex';
+    buildBrainNodes();
+    narrate('Welcome. Each node is a region of the mind. Click to explore.');
+};
+
+function buildBrainNodes(){
+    const ctr=document.getElementById('brain-ctr');
+    const sz=ctr.offsetWidth;
+    const cx=sz/2,cy=sz/2;
+    const svg=document.getElementById('brain-lines');
+    let lines='';
+
+    for(const n of NODE_DEFS){
+        const rad=n.angle*Math.PI/180;
+        const x=cx+Math.cos(rad)*sz*n.dist;
+        const y=cy+Math.sin(rad)*sz*n.dist;
+        // Line from center
+        lines+=`<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="rgba(90,216,188,0.08)" stroke-width="1"/>`;
+        // Node element
+        const el=document.createElement('div');
+        el.className='brain-node';
+        el.style.left=x+'px';el.style.top=y+'px';
+        el.style.setProperty('--node-color',n.color);
+        el.style.setProperty('--sz',n.sz+'px');
+        el.innerHTML=`<div class="brain-node-circle"><span class="brain-node-icon">${n.icon}</span></div><div class="brain-node-label">${n.label}</div>`;
+        el.addEventListener('click',()=>{
+            document.querySelectorAll('.brain-node').forEach(bn=>bn.classList.remove('active'));
+            el.classList.add('active');
+            narrate(n.story);
+            openRegion(n.id);
+        });
+        // Subtle float animation
+        const floatX=(Math.random()-.5)*6;
+        const floatY=(Math.random()-.5)*6;
+        const dur=3+Math.random()*2;
+        el.style.animation=`float-node ${dur}s ease-in-out infinite`;
+        el.style.setProperty('--fx',floatX+'px');
+        el.style.setProperty('--fy',floatY+'px');
+        ctr.appendChild(el);
+    }
+    svg.innerHTML=lines;
+
+    // Inject float keyframes
+    if(!document.getElementById('float-style')){
+        const s=document.createElement('style');s.id='float-style';
+        s.textContent=`@keyframes float-node{0%,100%{transform:translate(calc(-50% + var(--fx,0px)),calc(-50% + var(--fy,0px)))}50%{transform:translate(calc(-50% - var(--fx,0px)),calc(-50% - var(--fy,0px)))}}`;
+        document.head.appendChild(s);
+    }
+}
+
+/* ===== OPEN REGION PANELS ===== */
+function openRegion(id){
+    const d=DATA;const lb=d.field_labels||{};const fl=d.identity_fields||[];const ident=d.identity||{};
+    let h='';
+
+    if(id==='identity'){
+        const fields=fl.filter(f=>f!=='name'&&f!=='the_question'&&f!=='aspirations'&&f!=='purpose');
+        h+='<div class="p-grid">';
+        for(const k of fields)if(ident[k])h+=`<div class="p-card"><div class="p-label">${esc(lb[k]||k)}</div><div class="p-value">${esc(ident[k])}</div></div>`;
+        h+='</div>';
+        openPanel(h,'The Self');
+    }
+    else if(id==='question'){
+        if(ident.the_question){
+            h+=`<div class="p-card p-question"><div class="p-label">The question you wish someone would ask</div><div class="p-value">"${esc(ident.the_question)}"</div></div>`;
+        } else h='<div class="p-empty">No question discovered yet.</div>';
+        openPanel(h,'The Question');
+    }
+    else if(id==='aspirations'){
+        if(ident.purpose)h+=`<div class="p-card p-aspiration"><div class="p-label">${esc(lb.purpose||'Purpose')}</div><div class="p-value">${esc(ident.purpose)}</div></div>`;
+        if(ident.aspirations)h+=`<div class="p-card p-aspiration"><div class="p-label">${esc(lb.aspirations||'Aspirations')}</div><div class="p-value">${esc(ident.aspirations)}</div></div>`;
+        if(!h)h='<div class="p-empty">No aspirations yet.</div>';
+        openPanel(h,'Aspirations & Purpose');
+    }
+    else if(id==='dreams'){
+        const dreams=d.dreams||[];
+        if(!dreams.length){h='<div class="p-empty">No dreams yet. Run <code>mrhyde dream</code> to enter the dreamscape.</div>';}
+        else for(const dr of dreams){
+            const themes=Array.isArray(dr.themes)?dr.themes:[];
+            h+=`<div class="p-card p-dream">
+                <div class="p-dream-head"><span class="p-dream-id">Dream #${dr.id}</span><span class="p-dream-date">${fd(dr.created_at)}</span>${dr.mood?`<span class="p-dream-mood">${esc(dr.mood)}</span>`:''}</div>
+                <div class="p-dream-body" id="pdb-${dr.id}">${esc(dr.narrative)}</div>
+                <button class="p-dream-btn" onclick="togDream(${dr.id})">read full dream</button>
+                ${dr.interpretation?`<div class="p-dream-interp" id="pdi-${dr.id}">${esc(dr.interpretation)}</div>`:''}
+                ${themes.length?`<div class="p-dream-tags">${themes.map(t=>`<span class="p-dream-tag">${esc(t)}</span>`).join('')}</div>`:''}
+            </div>`;
+        }
+        openPanel(h,'Dreamscape');
+    }
+    else if(id==='memories'){
+        const mem=d.memories||[];
+        if(!mem.length){h='<div class="p-empty">No memories yet. The story hasn\'t started.</div>';}
+        else{
+            h+='<div id="p-mem-list">';
+            const show=Math.min(mem.length,25);
+            for(let i=0;i<show;i++){const m=mem[i];h+=memHTML(m)}
+            h+='</div>';
+            if(mem.length>25)h+=`<button class="p-more" id="p-more-mem" data-n="25" onclick="moreMem()">show more (${mem.length-25} remaining)</button>`;
+        }
+        openPanel(h,'Memories');
+    }
+    else if(id==='journal'){
+        const j=d.journal||[];
+        if(!j.length){h='<div class="p-empty">No journal entries yet. The inner voice is quiet.</div>';}
+        else{
+            h+='<div id="p-j-list">';
+            const show=Math.min(j.length,25);
+            for(let i=0;i<show;i++)h+=jHTML(j[i]);
+            h+='</div>';
+            if(j.length>25)h+=`<button class="p-more" id="p-more-j" data-n="25" onclick="moreJ()">show more (${j.length-25} remaining)</button>`;
+        }
+        openPanel(h,'Journal');
+    }
+    else if(id==='evolution'){
+        const hist=d.history||[];
+        if(!hist.length){h='<div class="p-empty">No evolutions yet. The identity is as it was born.</div>';}
+        else{
+            h+='<div class="p-evo-line">';
+            const rev=[...hist].reverse();
+            for(const e of rev)h+=`<div class="p-evo"><div class="p-evo-date">${fd(e.changed_at)}</div><div class="p-evo-field">${esc(lb[e.key]||e.key)}</div><div class="p-evo-old">${esc(tr(e.old_value,120))}</div><div class="p-evo-new">${esc(tr(e.new_value,120))}</div></div>`;
+            h+='</div>';
+        }
+        openPanel(h,'Evolution Timeline');
+    }
+    else if(id==='bonds'){
+        const bonds=d.bonds||[];const encs=d.encounters||[];
+        if(!bonds.length&&!encs.length){h='<div class="p-empty">No connections yet. The world is vast.</div>';}
+        else{
+            if(bonds.length){
+                h+='<div class="p-grid">';
+                for(const b of bonds)h+=`<div class="p-card p-bond"><div class="p-bond-name">${esc(b.name)}</div><div class="p-bond-hash">${esc(b.hash)}</div><div class="p-bond-badge bt-${esc(b.bond_type)}">${esc(b.bond_type)}</div>${b.note?`<div class="p-bond-note">"${esc(b.note)}"</div>`:''}<div class="p-bond-date">since ${fd(b.created_at)}</div></div>`;
+                h+='</div>';
+            }
+            if(encs.length){
+                h+='<div style="margin-top:20px">';
+                h+='<div class="p-label" style="margin-bottom:12px">Encounters</div>';
+                for(const e of encs)h+=`<div class="p-card p-enc"><div><span class="p-enc-name">${esc(e.name)}</span><span class="p-enc-hash">${esc(e.hash)}</span></div><div class="p-enc-date">met ${fd(e.first_met)}</div></div>`;
+                h+='</div>';
+            }
+        }
+        openPanel(h,'Bonds & Encounters');
+    }
+}
+
+function memHTML(m){return `<div class="p-card p-mem"><div class="p-mem-date">${fd(m.created_at)}</div><div class="p-mem-body">${esc(m.content)}${m.context?`<span class="p-mem-ctx">${esc(m.context)}</span>`:''}</div>${dots(m.importance)}</div>`}
+function jHTML(j){return `<div class="p-card"><div class="p-j-meta"><span class="p-j-date">${fd(j.created_at)}</span>${j.mood?`<span class="p-j-mood ${mc(j.mood)}">${esc(j.mood)}</span>`:''}</div><div class="p-j-text">${esc(j.entry)}</div></div>`}
+
+window.togDream=function(id){
+    const b=document.getElementById('pdb-'+id);
+    const i=document.getElementById('pdi-'+id);
+    const btn=b.parentElement.querySelector('.p-dream-btn');
+    b.classList.toggle('open');
+    if(b.classList.contains('open')){btn.textContent='collapse';if(i)i.classList.add('show')}
+    else{btn.textContent='read full dream';if(i)i.classList.remove('show')}
+};
+
+window.moreMem=function(){
+    const btn=document.getElementById('p-more-mem');
+    const list=document.getElementById('p-mem-list');
+    let n=parseInt(btn.dataset.n);const next=Math.min(n+25,DATA.memories.length);
+    for(let i=n;i<next;i++){const el=document.createElement('div');el.innerHTML=memHTML(DATA.memories[i]);list.appendChild(el.firstChild)}
+    btn.dataset.n=next;const rem=DATA.memories.length-next;
+    if(rem<=0)btn.remove();else btn.textContent=`show more (${rem} remaining)`;
+};
+window.moreJ=function(){
+    const btn=document.getElementById('p-more-j');
+    const list=document.getElementById('p-j-list');
+    let n=parseInt(btn.dataset.n);const next=Math.min(n+25,DATA.journal.length);
+    for(let i=n;i<next;i++){const el=document.createElement('div');el.innerHTML=jHTML(DATA.journal[i]);list.appendChild(el.firstChild)}
+    btn.dataset.n=next;const rem=DATA.journal.length-next;
+    if(rem<=0)btn.remove();else btn.textContent=`show more (${rem} remaining)`;
+};
+
+/* ===== INIT ===== */
+fetch('/api/all').then(r=>r.json()).then(render).catch(err=>{
+    document.getElementById('app').innerHTML=`<div class="no-id"><h1>Mr. Hyde</h1><p>Failed to load.</p><p style="color:var(--red)">${esc(err.message)}</p></div>`;
+    document.getElementById('loader').classList.add('gone');
+});
+
+})();
+</script>
+</body>
+</html>
